@@ -1,0 +1,7 @@
+import pygame
+
+WIN_WIDTH = 800
+WIN_HEIGHT = 600
+WIN_SIZE = (WIN_WIDTH, WIN_HEIGHT)
+
+FPS = 60
