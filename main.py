@@ -1,204 +1,198 @@
 import pygame
 from pygame.locals import *
-import res
+import random
 import sys
-import numpy as np
-pygame.init()
-myfont = pygame.font.SysFont(None, 15)
-
-class planet:
-    def __init__(self,x,y,R,side=0):
-        self.x=x
-        self.y=y
-        self.R=R
-        self.side=side #0 - neutral, 1-player1 2-player2 3-warzone
-        self.forces=[0.0,0.0]
-
-    def draw(self,screen):
-        label=None
-        if self.side==0:
-            colour=[100,100,100,0]
-        if self.side==1:
-            colour=[0,255,0,0]
-            label = myfont.render("%.1f"%self.forces[0], 1, (0,0,0))
-        if self.side==2:
-            colour=[0,0,255,0]
-            label = myfont.render("%.1f"%self.forces[1], 1, (255,255,255))
-        if self.side==3:
-            colour=[255,0,0,0]
-            label = myfont.render("%.1f:%.1f"%(self.forces[0],self.forces[1]), 1, (255,255,255))
-        pygame.draw.circle(screen, colour, (int(self.x),int(self.y)), int(int(self.R)))
-        if label:
-            screen.blit(label, (self.x, self.y))
+import graphics
+import entities
+import res
+import utils
 
 
-    def ifcollide(self,x,y):
-        if (x-self.x)**2 + (y-self.y)**2 < self.R*self.R:
-            return True
-        return False
+class Game:
 
-    def update(self,dt):
-        if self.forces[0]==0.0 and self.forces[1]==0.0:
-            self.side=0
+    def __init__(self, map_surface, camera, count=10):
+        self.map_surface = map_surface
+        self.planets = self.init_planets(count)
 
-        if self.forces[0]>0.0 and self.forces[1]==0.0:
-            self.side=1
-            self.forces[0]=np.min([self.forces[0]+0.02*dt,self.R/10.])
+        self.camera = camera
 
-        if self.forces[0]==0.0 and self.forces[1]>0.0:
-            self.side=2
-            self.forces[1]=np.min([self.forces[1]+0.02*dt,self.R/10.])
+        self.started = False
+        self.paused = False
 
-        if self.forces[0]>0.0 and self.forces[1]>0.0:
-            self.side=3
-            self.forces[0]=np.max([0.0,self.forces[0]-0.1*dt])
-            self.forces[1]=np.max([0.0,self.forces[1]-0.1*dt])
+        self.selected_planet = None
 
+        self.union = []
+        self.enemy = []
+        self.init_players()
 
+        self.landings = []
 
-class rocket:
-    def __init__(self,x,y,side):
-        self.x=x
-        self.y=y
-        self.side=side
-        self.vx=0.0
-        self.vy=0.0 
+    def init_planets(self, count):
+        raw_planets = res.planets
+        random.shuffle(raw_planets)
+        count = min(count, len(raw_planets))
 
-    def update(self,dt):
-        self.x+=self.vx*dt
-        self.y+=self.vy*dt
+        planets = []
 
-    def launch(self,vx,vy):
-        self.vx=vx
-        self.vy=vy
+        for i in range(count):
+            image = raw_planets[i]
+            size = (random.randint(64, 192),) * 2
+            image = pygame.transform.scale(image, size)
+            rect = image.get_rect()
 
-    def draw(self,screen):
-        if self.side==1:
-            colour=[100,255,100,0]
-        if self.side==2:
-            colour=[100,100,255,0]
-        pygame.draw.circle(screen, colour, (int(self.x),int(self.y)), 5)
+            while True:
+                rect.x = random.randint(0, res.MAP_WIDTH - rect.width)
+                rect.y = random.randint(0, res.MAP_HEIGHT - rect.height)
+                new_planet = entities.Planet(image, rect)
+                for planet in planets:
+                    if planet.collide_with(new_planet):
+                        break
+                else:
+                    break
 
-class game:
-    def __init__(self,nPlanets,(width,height)):
-         self.planets = []
-         for i in range(nPlanets):
-              collision=True
-              x=0
-              y=0
-              R=0
-              while collision==True:
-                  R= np.max([20.0,20.0*np.random.randn()+np.min([height,width])/100.0])
-                  x= np.max([np.min([width*np.random.rand(),width-R]),R])
-                  y= np.max([np.min([height*np.random.rand(),height-R]),R])
-                  print x,y,R
-                  collision=False
-                  for p in self.planets:
-                       if (p.x-x)*(p.x-x)+(p.y-y)*(p.y-y)<(p.R+R)*(p.R+R):
-                          collision=True
-                          break
-              self.planets.append(planet(x,y,R))
-         p1 = np.random.random_integers(1,nPlanets-1)
-         p2 = 0
-         self.planets[p1].forces[0]=1.0
-         self.planets[p2].forces[1]=1.0
-         print self.planets[p1].x,self.planets[p1].y
-         
-         self.rockets=[]
+            planets.append(new_planet)
 
-         self.G=3000.0
-         self.coefV=80.0
+        return planets
 
-#player
-         self.selection=p1
-   
-    def update(self,screen,dt):
+    def init_players(self):
+        players = random.sample(self.planets, 2)
 
-        for num,i in enumerate(self.planets):
-            #pygame.draw.circle(screen, [0,0,0], (int(i.x),int(i.y)), int(i.R+5))
-            if self.selection==num:
-                pygame.draw.circle(screen, [255,255,255], (int(i.x),int(i.y)), int(i.R+5))
-            i.draw(screen)
-            i.update(dt)
-            #gravity
-            for r in self.rockets:
-                dir=np.array([r.x-i.x,r.y-i.y])
-                ra=np.sqrt(dir[0]*dir[0]+dir[1]*dir[1])
-                f=self.G*i.R*dir/(ra**3)
-                r.vx-=f[0]*dt
-                r.vy-=f[1]*dt
-                
-        toRemove=[]
-        for r in self.rockets:
-            #print r.x,r.y,r.vx,r.vy
-            r.draw(screen)             
-            r.update(dt)
-            #landing of rockets
-            collided=False
-            for p in self.planets:
-                if p.ifcollide(r.x,r.y):
-                    p.forces[r.side-1]+=0.8
-                    collided=True
-            toRemove.append(collided)
+        player = players.pop()
+        player.set_side(union=True)
+        self.union.append(player)
 
-        new_rockets = []
-        for n,r in enumerate(self.rockets):
-            if not toRemove[n]:
-                new_rockets.append(r)
-        self.rockets=new_rockets
+        player = players.pop()
+        player.set_side(enemy=True)
+        self.enemy.append(player)
+
+    def draw(self):
+        for planet in self.planets:
+            planet.draw(self.map_surface)
+
+        for landing in self.landings:
+            landing.draw(self.map_surface)
+
+    def update(self, delta):
+        to_remove = []
+
+        for planet in self.planets:
+            for landing in self.landings:
+                if planet.collide_with_point(landing.get_pos()):
+                    if landing.union:
+                        planet.union_units += 1
+                    else:
+                        planet.enemy_units += 1
+                    to_remove.append(landing)
+                else:
+                    landing_x, landing_y = landing.get_pos()
+                    planet_x, planet_y = planet.get_pos()
+                    direction = utils.Vector2(x=landing_x - planet_x, y=landing_y - planet_y)
+                    force = direction * ((3000 * planet.radius) / pow(direction.modul(), 3))
+                    landing.velocity = landing.velocity - (force * delta)
+
+        for planet in self.planets:
+            planet.update(delta)
+
+        for landing in self.landings:
+            if landing in to_remove:
+                self.landings.remove(landing)
+                continue
+            landing.update(delta)
 
 
+    def select_planet(self, pos):
+        for planet in self.planets:
+            if planet.collide_with_point(self.camera.convert_pos(pos)):
+                if self.selected_planet:
+                    self.selected_planet.unselect()
+                self.selected_planet = planet
+                planet.select()
+                break
+        else:
+            if self.selected_planet:
+                self.selected_planet.unselect()
+                self.selected_planet = None
 
-    def selectPlanet(self,x,y):
-        for nSel,p in enumerate(self.planets):
-            if p.ifcollide(x,y):
-                self.selection=nSel
+    def launch_landing(self, pos, union=True):
+        if not self.selected_planet:
+            return
 
-    def launchRocket(self,x,y):
-        x0=self.planets[self.selection].x
-        y0=self.planets[self.selection].y
-        pr0=np.array([x0,y0])
-        R = self.planets[self.selection].R
-        dir=np.array([x-x0,y-y0])
-        moddir=np.sqrt(dir[0]*dir[0]+dir[1]*dir[1])
-        r0= pr0 + dir*(R+0.1)/moddir
-        new_rocket=rocket(r0[0],r0[1],1)
-        v0=self.coefV*dir/moddir
+        x, y = self.selected_planet.get_pos()
+        result_x, result_y = self.camera.convert_pos(pos)
+        radius = self.selected_planet.radius
+        direction = utils.Vector2(x=result_x - x, y=result_y - y)
+        start_position = (direction * ((radius + 5) / direction.modul())) + utils.Vector2(x=x, y=y)
 
-        if v0[0]*dir[0]+v0[1]*dir[1]>0 and self.planets[self.selection].forces[0]>1.0:
-            new_rocket.launch(v0[0],v0[1])
-            self.rockets.append(new_rocket)
-            self.planets[self.selection].forces[0]-=1
+        new_landing = entities.Landing(union)
+        new_landing.set_pos(start_position.as_tuple())
+        velocity = direction * (80 / direction.modul()) 
+
+        if velocity * direction > 0:
+            if self.selected_planet.is_union() and self.selected_planet.union_units > 1.0 and union \
+            or self.selected_planet.is_enemy() and self.selected_planet.enemy_units > 1.0 and not union:
+                new_landing.launch(velocity)
+                self.landings.append(new_landing)
+                if union: self.selected_planet.union_units -= 1
+                else: self.selected_planet.enemy_units -= 1
 
 
-
-LEFT=1
-RIGHT=3
 def main():
-
+    pygame.init()
     window = pygame.display.set_mode(res.WIN_SIZE)
     pygame.display.set_caption('Risk')
     clock = pygame.time.Clock()
+    res.init()
+    camera = graphics.Camera()
 
-    G = game(10,res.WIN_SIZE)
+    map_surface = pygame.Surface(res.MAP_SIZE)
+    game = Game(map_surface, camera)
+
+    stars = graphics.Stars()
+    key_states = [False, False, False, False]
+
     while True:
-    	delta = clock.tick(res.FPS) / 1000.0
+        delta = clock.tick(res.FPS) / 1000.0
+        map_surface.fill((32, 32, 48))
 
         for event in pygame.event.get():
-            if (event.type == QUIT):
+            if event.type == QUIT:
                 sys.exit(0)
-            if  event.type == pygame.MOUSEBUTTONDOWN and event.button == LEFT:
-                pos=pygame.mouse.get_pos()
-                G.selectPlanet(pos[0],pos[1])
-                print pos,"left"
-            if  event.type == pygame.MOUSEBUTTONDOWN and event.button == RIGHT:
-                pos=pygame.mouse.get_pos()
-                G.launchRocket(pos[0],pos[1])
-                print pos, "right"
-        window.fill((0,0,0))
-        G.update(window,delta)
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                if event.button == 1:
+                    game.select_planet(pygame.mouse.get_pos())
+                if event.button == 3:
+                    game.launch_landing(pygame.mouse.get_pos(), union=True)
+            if event.type == KEYDOWN:
+                if event.key == K_ESCAPE:
+                    sys.exit(0)
+                if event.key == K_LEFT:
+                    key_states[0] = True
+                if event.key == K_RIGHT:
+                    key_states[1] = True
+                if event.key == K_UP:
+                    key_states[2] = True
+                if event.key == K_DOWN:
+                    key_states[3] = True
+            if event.type == KEYUP:
+                if event.key == K_LEFT:
+                    key_states[0] = False
+                if event.key == K_RIGHT:
+                    key_states[1] = False
+                if event.key == K_UP:
+                    key_states[2] = False
+                if event.key == K_DOWN:
+                    key_states[3] = False
 
+        stars.draw(map_surface)
+
+        game.draw()
+        camera.update(delta, key_states)
+
+        window.blit(map_surface, camera.get_pos())
         pygame.display.flip()
+
+        stars.update(delta)
+        game.update(delta)
 
 if __name__ == '__main__':
     main()
